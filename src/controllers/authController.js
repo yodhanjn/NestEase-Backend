@@ -33,10 +33,16 @@ const register = async (req, res, next) => {
       otpExpiry,
     });
 
-    // Send email in background — do not block the response
-    sendOTPEmail(email, otp).catch((mailErr) => {
-      console.error('Email send error:', mailErr.message);
-    });
+    try {
+      await sendOTPEmail(email, otp);
+    } catch (mailErr) {
+      console.error('Email send error during register:', mailErr.message);
+      return res.status(502).json({
+        success: false,
+        message: 'Account created, but OTP email could not be sent. Please use Resend OTP.',
+        userId: user._id,
+      });
+    }
 
     res.status(201).json({
       success: true,
@@ -108,9 +114,15 @@ const resendOTP = async (req, res, next) => {
     user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
     await user.save();
 
-    sendOTPEmail(user.email, otp).catch((mailErr) => {
+    try {
+      await sendOTPEmail(user.email, otp);
+    } catch (mailErr) {
       console.error('Resend OTP email error:', mailErr.message);
-    });
+      return res.status(502).json({
+        success: false,
+        message: 'Failed to send OTP email. Please try again.',
+      });
+    }
 
     res.status(200).json({ success: true, message: 'New OTP sent to your email' });
   } catch (err) {

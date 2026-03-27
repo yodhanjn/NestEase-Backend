@@ -1,10 +1,16 @@
 const nodemailer = require('nodemailer');
 
+const emailUser = process.env.EMAIL_USER || '';
+// App passwords are often pasted with spaces; normalize before SMTP auth.
+const emailPass = (process.env.EMAIL_PASS || '').replace(/\s+/g, '');
+
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: 'smtp.gmail.com',
+  port: 465,
+  secure: true,
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
+    user: emailUser,
+    pass: emailPass,
   },
   connectionTimeout: 10000,
   greetingTimeout: 10000,
@@ -12,8 +18,12 @@ const transporter = nodemailer.createTransport({
 });
 
 const sendOTPEmail = async (to, otp) => {
+  if (!emailUser || !emailPass) {
+    throw new Error('Email transport is not configured. EMAIL_USER/EMAIL_PASS missing.');
+  }
+
   const mailOptions = {
-    from: `"NestEase" <${process.env.EMAIL_USER}>`,
+    from: `"NestEase" <${emailUser}>`,
     to,
     subject: 'Verify your NestEase account',
     html: `
