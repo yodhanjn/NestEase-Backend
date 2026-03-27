@@ -11,9 +11,10 @@ const emailUser = (process.env.EMAIL_USER || '').trim();
 // App passwords are often pasted with spaces/quotes; normalize before SMTP auth.
 const emailPass = normalizeSecret(process.env.EMAIL_PASS);
 const resendApiKey = normalizeSecret(process.env.RESEND_API_KEY);
-const resendFrom =
-  (process.env.MAIL_FROM || '').trim() ||
-  (emailUser ? `"NestEase" <${emailUser}>` : '"NestEase" <onboarding@resend.dev>');
+const configuredFrom = (process.env.MAIL_FROM || '').trim();
+const smtpFrom = configuredFrom || (emailUser ? `"NestEase" <${emailUser}>` : '');
+// Resend requires a sender that belongs to a verified identity/domain.
+const resendFrom = configuredFrom || '"NestEase" <onboarding@resend.dev>';
 
 const baseTransportConfig = {
   auth: {
@@ -86,9 +87,12 @@ const sendViaSmtp = async (to, subject, html) => {
   if (!emailUser || !emailPass) {
     throw new Error('SMTP is not configured. EMAIL_USER/EMAIL_PASS missing.');
   }
+  if (!smtpFrom) {
+    throw new Error('SMTP sender is not configured. Set MAIL_FROM or EMAIL_USER.');
+  }
 
   const mailOptions = {
-    from: resendFrom,
+    from: smtpFrom,
     to,
     subject,
     html,
@@ -131,7 +135,7 @@ const sendOTPEmail = async (to, otp) => {
       await sendViaResend(to, subject, html);
       return;
     } catch (error) {
-      // fallback to SMTP below
+      console.error('Resend send failed, falling back to SMTP:', error.message);
     }
   }
 

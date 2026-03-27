@@ -26,7 +26,10 @@ ensureSingleAdmin().catch((error) => {
 });
 
 const envAllowedOrigins = [
-  process.env.CLIENT_URL,
+  ...(process.env.CLIENT_URL || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean),
   ...(process.env.CLIENT_URLS || '')
     .split(',')
     .map((item) => item.trim())
