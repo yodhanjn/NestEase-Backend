@@ -1,4 +1,5 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns');
 
 const normalizeSecret = (secret) =>
   (secret || '')
@@ -15,6 +16,11 @@ const baseTransportConfig = {
     user: emailUser,
     pass: emailPass,
   },
+  // Render/hosted environments may not have outbound IPv6 routing.
+  // Force IPv4 DNS resolution for SMTP to avoid ENETUNREACH on AAAA records.
+  family: 4,
+  lookup: (hostname, options, callback) =>
+    dns.lookup(hostname, { ...(options || {}), family: 4, all: false }, callback),
   connectionTimeout: 15000,
   greetingTimeout: 15000,
   socketTimeout: 20000,
