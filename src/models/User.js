@@ -52,6 +52,8 @@ const userSchema = new mongoose.Schema(
 
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) return;
+  // If password already looks like a bcrypt hash, keep it as-is.
+  if (typeof this.password === 'string' && this.password.startsWith('$2')) return;
   this.password = await bcrypt.hash(this.password, 12);
 });
 

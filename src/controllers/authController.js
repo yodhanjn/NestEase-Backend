@@ -1,4 +1,6 @@
 const User = require('../models/User');
+const PendingRegistration = require('../models/PendingRegistration');
+const bcrypt = require('bcryptjs');
 const { generateToken } = require('../utils/jwt');
 const { sendOTPEmail } = require('../utils/mailer');
 
@@ -23,15 +25,25 @@ const register = async (req, res, next) => {
     const allowedPublicRoles = ['resident', 'owner'];
     const safeRole = allowedPublicRoles.includes(role) ? role : 'resident';
 
-    const user = await User.create({
-      name,
-      email,
-      phone,
-      password,
-      role: safeRole,
-      otp,
-      otpExpiry,
-    });
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    const pending = await PendingRegistration.findOneAndUpdate(
+      { email },
+      {
+        name,
+        email,
+        phone: phone || '',
+        passwordHash,
+        role: safeRole,
+        otp,
+        otpExpiry,
+      },
+      {
+        upsert: true,
+        new: true,
+        setDefaultsOnInsert: true,
+      }
+    );
 
     try {
       await sendOTPEmail(email, otp);
@@ -39,15 +51,15 @@ const register = async (req, res, next) => {
       console.error('Email send error during register:', mailErr.message);
       return res.status(502).json({
         success: false,
-        message: 'Account created, but OTP email could not be sent. Please use Resend OTP.',
-        userId: user._id,
+        message: 'OTP email could not be sent. Please use Resend OTP.',
+        userId: pending._id,
       });
     }
 
     res.status(201).json({
       success: true,
-      message: 'Registration successful. Please verify your email with the OTP sent.',
-      userId: user._id,
+      message: 'OTP sent. Your account will be created after verification.',
+      userId: pending._id,
     });
   } catch (err) {
     console.error('Register error:', err);
@@ -59,23 +71,36 @@ const verifyOTP = async (req, res, next) => {
   try {
     const { userId, otp } = req.body;
 
-    const user = await User.findById(userId).select('+otp +otpExpiry');
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+    const pending = await PendingRegistration.findById(userId).select('+otp +otpExpiry +passwordHash');
+    if (!pending) {
+      return res.status(404).json({ success: false, message: 'Pending registration not found' });
     }
 
-    if (user.otp !== otp) {
+    if (pending.otp !== otp) {
       return res.status(400).json({ success: false, message: 'Invalid OTP' });
     }
 
-    if (user.otpExpiry < new Date()) {
+    if (pending.otpExpiry < new Date()) {
       return res.status(400).json({ success: false, message: 'OTP has expired. Please request a new one.' });
     }
 
-    user.isVerified = true;
-    user.otp = undefined;
-    user.otpExpiry = undefined;
-    await user.save();
+    const existingUser = await User.findOne({ email: pending.email });
+    if (existingUser) {
+      await PendingRegistration.deleteOne({ _id: pending._id });
+      return res.status(400).json({ success: false, message: 'Email already registered. Please login.' });
+    }
+
+    const user = await User.create({
+      name: pending.name,
+      email: pending.email,
+      phone: pending.phone,
+      // already bcrypt-hashed; User model hook skips re-hash for $2* values
+      password: pending.passwordHash,
+      role: pending.role,
+      isVerified: true,
+    });
+
+    await PendingRegistration.deleteOne({ _id: pending._id });
 
     const token = generateToken(user._id);
 
@@ -100,22 +125,18 @@ const resendOTP = async (req, res, next) => {
   try {
     const { userId } = req.body;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    if (user.isVerified) {
-      return res.status(400).json({ success: false, message: 'Email already verified' });
+    const pending = await PendingRegistration.findById(userId);
+    if (!pending) {
+      return res.status(404).json({ success: false, message: 'Pending registration not found' });
     }
 
     const otp = generateOTP();
-    user.otp = otp;
-    user.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
-    await user.save();
+    pending.otp = otp;
+    pending.otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
+    await pending.save();
 
     try {
-      await sendOTPEmail(user.email, otp);
+      await sendOTPEmail(pending.email, otp);
     } catch (mailErr) {
       console.error('Resend OTP email error:', mailErr.message);
       return res.status(502).json({
@@ -186,9 +207,15 @@ const getOTPDev = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Not available in production' });
     }
     const { userId } = req.params;
+    const pending = await PendingRegistration.findById(userId).select('+otp +otpExpiry');
+    if (pending) {
+      return res.status(200).json({ success: true, otp: pending.otp, otpExpiry: pending.otpExpiry });
+    }
+
+    // Backward compatibility for older unverified users.
     const user = await User.findById(userId).select('+otp +otpExpiry');
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
-    res.status(200).json({ success: true, otp: user.otp, otpExpiry: user.otpExpiry });
+    return res.status(200).json({ success: true, otp: user.otp, otpExpiry: user.otpExpiry });
   } catch (err) {
     next(err);
   }
