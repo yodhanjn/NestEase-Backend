@@ -25,27 +25,37 @@ ensureSingleAdmin().catch((error) => {
   console.error('Admin seed check failed:', error.message);
 });
 
-const allowedOrigins = [
+const envAllowedOrigins = [
   process.env.CLIENT_URL,
+  ...(process.env.CLIENT_URLS || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean),
+];
+
+const staticAllowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
-].filter(Boolean);
+];
+
+const allowedOrigins = [...new Set([...envAllowedOrigins, ...staticAllowedOrigins])];
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (/^http:\/\/localhost:\d+$/.test(origin)) return true;
+  if (/^http:\/\/127\.0\.0\.1:\d+$/.test(origin)) return true;
+  // Allow Vercel deployment/preview domains
+  if (/^https:\/\/[a-zA-Z0-9-]+\.vercel\.app$/.test(origin)) return true;
+  return false;
+};
 
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow non-browser tools and same-origin requests.
-      if (!origin) return callback(null, true);
-
-      const isAllowed =
-        allowedOrigins.includes(origin) ||
-        /^http:\/\/localhost:\d+$/.test(origin) ||
-        /^http:\/\/127\.0\.0\.1:\d+$/.test(origin);
-
-      if (isAllowed) return callback(null, true);
-
+      if (isAllowedOrigin(origin)) return callback(null, true);
       return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
@@ -69,7 +79,10 @@ app.use(errorHandler);
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+      if (isAllowedOrigin(origin)) return callback(null, true);
+      return callback(new Error(`Socket CORS blocked for origin: ${origin}`));
+    },
     credentials: true,
   },
 });
