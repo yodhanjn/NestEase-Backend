@@ -1,29 +1,53 @@
 const nodemailer = require('nodemailer');
 
-const emailUser = process.env.EMAIL_USER || '';
-// App passwords are often pasted with spaces; normalize before SMTP auth.
-const emailPass = (process.env.EMAIL_PASS || '').replace(/\s+/g, '');
+const normalizeSecret = (secret) =>
+  (secret || '')
+    .trim()
+    .replace(/^['"]|['"]$/g, '')
+    .replace(/\s+/g, '');
 
-const transporter = nodemailer.createTransport({
-  host: 'smtp.gmail.com',
-  port: 465,
-  secure: true,
+const emailUser = (process.env.EMAIL_USER || '').trim();
+// App passwords are often pasted with spaces/quotes; normalize before SMTP auth.
+const emailPass = normalizeSecret(process.env.EMAIL_PASS);
+
+const baseTransportConfig = {
   auth: {
     user: emailUser,
     pass: emailPass,
   },
-  connectionTimeout: 10000,
-  greetingTimeout: 10000,
-  socketTimeout: 15000,
-});
+  connectionTimeout: 15000,
+  greetingTimeout: 15000,
+  socketTimeout: 20000,
+};
+
+const transportProfiles = [
+  // Primary: SSL SMTP
+  {
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+  },
+  // Fallback: STARTTLS SMTP (works on environments where 465 is blocked)
+  {
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    requireTLS: true,
+  },
+  // Final fallback: service preset
+  {
+    service: 'gmail',
+  },
+];
 
 const sendOTPEmail = async (to, otp) => {
   if (!emailUser || !emailPass) {
     throw new Error('Email transport is not configured. EMAIL_USER/EMAIL_PASS missing.');
   }
 
+  const fromAddress = process.env.MAIL_FROM || `"NestEase" <${emailUser}>`;
   const mailOptions = {
-    from: `"NestEase" <${emailUser}>`,
+    from: fromAddress,
     to,
     subject: 'Verify your NestEase account',
     html: `
@@ -39,7 +63,21 @@ const sendOTPEmail = async (to, otp) => {
     `,
   };
 
-  await transporter.sendMail(mailOptions);
+  let lastError;
+  for (const profile of transportProfiles) {
+    try {
+      const transporter = nodemailer.createTransport({
+        ...baseTransportConfig,
+        ...profile,
+      });
+      await transporter.sendMail(mailOptions);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw new Error(lastError?.message || 'Failed to send OTP email');
 };
 
 module.exports = { sendOTPEmail };
