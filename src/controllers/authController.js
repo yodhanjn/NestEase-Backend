@@ -51,7 +51,7 @@ const register = async (req, res, next) => {
       console.error('Email send error during register:', mailErr.message);
       return res.status(502).json({
         success: false,
-        message: 'OTP email could not be sent. Please use Resend OTP.',
+        message: 'OTP email could not be sent. Please try again.',
         userId: pending._id,
       });
     }
@@ -138,7 +138,7 @@ const resendOTP = async (req, res, next) => {
     try {
       await sendOTPEmail(pending.email, otp);
     } catch (mailErr) {
-      console.error('Resend OTP email error:', mailErr.message);
+      console.error('OTP email resend error:', mailErr.message);
       return res.status(502).json({
         success: false,
         message: 'Failed to send OTP email. Please try again.',

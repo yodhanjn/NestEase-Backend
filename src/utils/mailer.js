@@ -1,118 +1,58 @@
-const nodemailer = require('nodemailer');
-const dns = require('dns');
-
 const normalizeSecret = (secret) =>
   (secret || '')
     .trim()
     .replace(/^['"]|['"]$/g, '')
     .replace(/\s+/g, '');
 
-const emailUser = (process.env.EMAIL_USER || '').trim();
-// App passwords are often pasted with spaces/quotes; normalize before SMTP auth.
-const emailPass = normalizeSecret(process.env.EMAIL_PASS);
-const resendApiKey = normalizeSecret(process.env.RESEND_API_KEY);
-const configuredFrom = (process.env.MAIL_FROM || '').trim();
-const smtpFrom = configuredFrom || (emailUser ? `"NestEase" <${emailUser}>` : '');
-// Resend requires a sender that belongs to a verified identity/domain.
-const resendFrom = configuredFrom || '"NestEase" <onboarding@resend.dev>';
+const sendGridApiKey = normalizeSecret(process.env.SENDGRID_API_KEY);
+const mailFrom = (process.env.MAIL_FROM || '').trim();
+const fromMatch = mailFrom.match(/^(.*)<([^<>@\s]+@[^<>@\s]+)>$/);
+const fromName = fromMatch ? fromMatch[1].trim().replace(/^"|"$/g, '') : '';
+const fromEmail = fromMatch ? fromMatch[2].trim() : mailFrom;
 
-const baseTransportConfig = {
-  auth: {
-    user: emailUser,
-    pass: emailPass,
-  },
-  // Render/hosted environments may not have outbound IPv6 routing.
-  // Force IPv4 DNS resolution for SMTP to avoid ENETUNREACH on AAAA records.
-  family: 4,
-  lookup: (hostname, options, callback) =>
-    dns.lookup(hostname, { ...(options || {}), family: 4, all: false }, callback),
-  connectionTimeout: 15000,
-  greetingTimeout: 15000,
-  socketTimeout: 20000,
-};
-
-const transportProfiles = [
-  // Primary: SSL SMTP
-  {
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-  },
-  // Fallback: STARTTLS SMTP (works on environments where 465 is blocked)
-  {
-    host: 'smtp.gmail.com',
-    port: 587,
-    secure: false,
-    requireTLS: true,
-  },
-  // Final fallback: service preset
-  {
-    service: 'gmail',
-  },
-];
-
-const sendViaResend = async (to, subject, html) => {
-  if (!resendApiKey) {
-    throw new Error('RESEND_API_KEY is missing');
+const sendViaSendGrid = async (to, subject, html) => {
+  if (!sendGridApiKey) {
+    throw new Error('SENDGRID_API_KEY is missing');
+  }
+  if (!mailFrom) {
+    throw new Error('MAIL_FROM is missing');
+  }
+  if (!fromEmail) {
+    throw new Error('MAIL_FROM must contain a valid sender email');
   }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const response = await fetch('https://api.resend.com/emails', {
+    const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${resendApiKey}`,
+        Authorization: `Bearer ${sendGridApiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: resendFrom,
-        to: [to],
-        subject,
-        html,
+        from: {
+          email: fromEmail,
+          ...(fromName ? { name: fromName } : {}),
+        },
+        personalizations: [
+          {
+            to: [{ email: to }],
+            subject,
+          },
+        ],
+        content: [{ type: 'text/html', value: html }],
       }),
       signal: controller.signal,
     });
 
-    if (!response.ok) {
+    if (response.status !== 202) {
       const body = await response.text();
-      throw new Error(`Resend API error (${response.status}): ${body}`);
+      throw new Error(`SendGrid API error (${response.status}): ${body}`);
     }
   } finally {
     clearTimeout(timeout);
   }
-};
-
-const sendViaSmtp = async (to, subject, html) => {
-  if (!emailUser || !emailPass) {
-    throw new Error('SMTP is not configured. EMAIL_USER/EMAIL_PASS missing.');
-  }
-  if (!smtpFrom) {
-    throw new Error('SMTP sender is not configured. Set MAIL_FROM or EMAIL_USER.');
-  }
-
-  const mailOptions = {
-    from: smtpFrom,
-    to,
-    subject,
-    html,
-  };
-
-  let lastError;
-  for (const profile of transportProfiles) {
-    try {
-      const transporter = nodemailer.createTransport({
-        ...baseTransportConfig,
-        ...profile,
-      });
-      await transporter.sendMail(mailOptions);
-      return;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw new Error(lastError?.message || 'Failed to send OTP email');
 };
 
 const sendOTPEmail = async (to, otp) => {
@@ -129,17 +69,7 @@ const sendOTPEmail = async (to, otp) => {
       </div>
     `;
 
-  // Prefer HTTP API in production networks where SMTP can be blocked.
-  if (resendApiKey) {
-    try {
-      await sendViaResend(to, subject, html);
-      return;
-    } catch (error) {
-      console.error('Resend send failed, falling back to SMTP:', error.message);
-    }
-  }
-
-  await sendViaSmtp(to, subject, html);
+  await sendViaSendGrid(to, subject, html);
 };
 
 module.exports = { sendOTPEmail };
