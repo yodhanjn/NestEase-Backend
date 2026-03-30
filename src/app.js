@@ -15,6 +15,8 @@ const reviewRoutes = require('./routes/reviewRoutes');
 const feedbackRoutes = require('./routes/feedbackRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const recommendationRoutes = require('./routes/recommendationRoutes');
+const reportRoutes = require('./routes/reportRoutes');
 const { initChatSocket } = require('./socket/chatSocket');
 
 const app = express();
@@ -75,6 +77,8 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/feedback', feedbackRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/recommendations', recommendationRoutes);
+app.use('/api/reports', reportRoutes);
 
 app.get('/api/health', (req, res) => res.json({ status: 'NestEase API is running' }));
 
