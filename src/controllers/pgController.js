@@ -1,6 +1,18 @@
 const PGProperty = require('../models/PGProperty');
 const cloudinary = require('../config/cloudinary');
 
+const uploadBufferToCloudinary = (buffer) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder: 'nestease/pg_images', resource_type: 'image' },
+      (error, result) => {
+        if (error) return reject(error);
+        return resolve(result);
+      }
+    );
+    stream.end(buffer);
+  });
+
 const createPG = async (req, res, next) => {
   try {
     const { pgName, description, address, city, state, pincode, lat, lng, price, genderAllowed, availableRooms, amenities } = req.body;
@@ -35,9 +47,7 @@ const uploadPGImages = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'No images uploaded' });
     }
 
-    const uploadPromises = req.files.map((file) =>
-      cloudinary.uploader.upload(file.path, { folder: 'nestease/pg_images' })
-    );
+    const uploadPromises = req.files.map((file) => uploadBufferToCloudinary(file.buffer));
     const results = await Promise.all(uploadPromises);
     const imageUrls = results.map((r) => r.secure_url);
 
