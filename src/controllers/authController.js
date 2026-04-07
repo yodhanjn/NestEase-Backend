@@ -3,6 +3,7 @@ const PendingRegistration = require('../models/PendingRegistration');
 const bcrypt = require('bcryptjs');
 const { generateToken } = require('../utils/jwt');
 const { sendOTPEmail } = require('../utils/mailer');
+const { createNotification } = require('../services/notificationService');
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
@@ -101,6 +102,15 @@ const verifyOTP = async (req, res, next) => {
     });
 
     await PendingRegistration.deleteOne({ _id: pending._id });
+
+    await createNotification({
+      userId: user._id,
+      type: 'auth',
+      title: 'Welcome to NestEase',
+      message: 'Your account is verified. Start exploring PGs and bookings.',
+      route: user.role === 'owner' ? '/dashboard/owner' : '/dashboard/resident',
+      entityId: user._id,
+    });
 
     const token = generateToken(user._id);
 

@@ -1,4 +1,5 @@
 const PGProperty = require('../models/PGProperty');
+const { createNotification } = require('../services/notificationService');
 
 const getPendingPGs = async (req, res, next) => {
   try {
@@ -48,6 +49,15 @@ const approvePG = async (req, res, next) => {
     pg.isActive = true;
     await pg.save();
 
+    await createNotification({
+      userId: pg.owner,
+      type: 'approval',
+      title: 'PG approved',
+      message: `${pg.pgName} has been approved and is now visible to residents.`,
+      route: '/dashboard/owner',
+      entityId: pg._id,
+    });
+
     res.status(200).json({ success: true, message: 'PG approved successfully', pg });
   } catch (err) {
     next(err);
@@ -66,6 +76,15 @@ const rejectPG = async (req, res, next) => {
     pg.isFlagged = true;
     await pg.save();
 
+    await createNotification({
+      userId: pg.owner,
+      type: 'approval',
+      title: 'PG rejected',
+      message: `${pg.pgName} was rejected by admin and removed from listings.`,
+      route: '/dashboard/owner',
+      entityId: pg._id,
+    });
+
     res.status(200).json({ success: true, message: 'PG rejected and removed from listing', pg });
   } catch (err) {
     next(err);
@@ -82,6 +101,15 @@ const removeUnderperformingPG = async (req, res, next) => {
     pg.isActive = false;
     pg.isFlagged = true;
     await pg.save();
+
+    await createNotification({
+      userId: pg.owner,
+      type: 'approval',
+      title: 'PG removed by admin',
+      message: `${pg.pgName} was removed due to low performance.`,
+      route: '/dashboard/owner',
+      entityId: pg._id,
+    });
 
     res.status(200).json({ success: true, message: 'PG removed due to low performance', pg });
   } catch (err) {

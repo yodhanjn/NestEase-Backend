@@ -1,5 +1,6 @@
 const Booking = require('../models/Booking');
 const PGProperty = require('../models/PGProperty');
+const { createNotification } = require('../services/notificationService');
 
 const createBooking = async (req, res, next) => {
   try {
@@ -31,6 +32,15 @@ const createBooking = async (req, res, next) => {
       checkInDate: checkIn,
       checkOutDate: checkOut,
       note: note || '',
+    });
+
+    await createNotification({
+      userId: pg.owner,
+      type: 'booking',
+      title: 'New booking request',
+      message: `${req.user.name} requested booking for ${pg.pgName}.`,
+      route: '/dashboard/owner/bookings',
+      entityId: booking._id,
     });
 
     const populated = await Booking.findById(booking._id)
@@ -84,7 +94,7 @@ const updateBookingStatus = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Invalid booking status' });
     }
 
-    const booking = await Booking.findById(req.params.id).populate('pg', 'owner');
+    const booking = await Booking.findById(req.params.id).populate('pg', 'owner pgName');
     if (!booking) {
       return res.status(404).json({ success: false, message: 'Booking not found' });
     }
@@ -97,6 +107,15 @@ const updateBookingStatus = async (req, res, next) => {
 
     booking.status = status;
     await booking.save();
+
+    await createNotification({
+      userId: booking.user,
+      type: 'booking',
+      title: 'Booking status updated',
+      message: `Your booking for ${booking.pg?.pgName || 'a PG'} is now ${status}.`,
+      route: '/dashboard/resident/bookings',
+      entityId: booking._id,
+    });
 
     res.status(200).json({ success: true, message: 'Booking status updated', booking });
   } catch (err) {

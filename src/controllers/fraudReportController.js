@@ -1,5 +1,7 @@
 const FraudReport = require('../models/FraudReport');
 const PGProperty = require('../models/PGProperty');
+const User = require('../models/User');
+const { createBulkNotifications, createNotification } = require('../services/notificationService');
 
 const riskScoreFromReason = (reason = '') => {
   const text = String(reason).toLowerCase();
@@ -41,6 +43,18 @@ const submitFraudReport = async (req, res, next) => {
       pg.isFlagged = true;
       await pg.save();
     }
+
+    const admins = await User.find({ role: 'admin' }).select('_id');
+    await createBulkNotifications(
+      admins.map((admin) => ({
+        userId: admin._id,
+        type: 'fraud',
+        title: 'New fraud report',
+        message: `A new fraud report was submitted for ${pg.pgName}.`,
+        route: '/dashboard/admin',
+        entityId: report._id,
+      }))
+    );
 
     res.status(201).json({
       success: true,
@@ -117,6 +131,18 @@ const actOnFraudReport = async (req, res, next) => {
     }
 
     await report.save();
+
+    if (report.reportedBy) {
+      await createNotification({
+        userId: report.reportedBy,
+        type: 'fraud',
+        title: 'Fraud report updated',
+        message: `Your fraud report status is now ${report.status.replace('_', ' ')}.`,
+        route: '/dashboard/resident',
+        entityId: report._id,
+      });
+    }
+
     const populated = await FraudReport.findById(report._id)
       .populate('reportedPg', 'pgName location isActive isVerified isFlagged')
       .populate('reportedBy', 'name email role');
