@@ -7,6 +7,31 @@ const { createNotification } = require('../services/notificationService');
 
 const generateOTP = () => Math.floor(100000 + Math.random() * 900000).toString();
 
+// OTP flow is kept in code but disabled by default. Set OTP_ENABLED=true to re-enable.
+const OTP_ENABLED = process.env.OTP_ENABLED === 'true';
+
+const createVerifiedUser = async ({ name, email, phone, password, role }) => {
+  const user = await User.create({
+    name,
+    email,
+    phone: phone || '',
+    password,
+    role,
+    isVerified: true,
+  });
+
+  await createNotification({
+    userId: user._id,
+    type: 'auth',
+    title: 'Welcome to NestEase',
+    message: 'Your account is ready. Start exploring PGs and bookings.',
+    route: user.role === 'owner' ? '/dashboard/owner' : '/dashboard/resident',
+    entityId: user._id,
+  });
+
+  return user;
+};
+
 const register = async (req, res, next) => {
   try {
     const { name, email, phone, password, role } = req.body;
@@ -20,12 +45,36 @@ const register = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Email already registered' });
     }
 
-    const otp = generateOTP();
-    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
-
     const allowedPublicRoles = ['resident', 'owner'];
     const safeRole = allowedPublicRoles.includes(role) ? role : 'resident';
 
+    if (!OTP_ENABLED) {
+      const user = await createVerifiedUser({
+        name,
+        email,
+        phone,
+        password,
+        role: safeRole,
+      });
+
+      const token = generateToken(user._id);
+
+      return res.status(201).json({
+        success: true,
+        message: 'Account created successfully',
+        token,
+        user: {
+          _id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          isVerified: user.isVerified,
+        },
+      });
+    }
+
+    const otp = generateOTP();
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000);
     const passwordHash = await bcrypt.hash(password, 12);
 
     const pending = await PendingRegistration.findOneAndUpdate(
@@ -179,7 +228,7 @@ const login = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid email or password' });
     }
 
-    if (!user.isVerified) {
+    if (OTP_ENABLED && !user.isVerified) {
       return res.status(403).json({
         success: false,
         message: 'Please verify your email before logging in',
