@@ -18,12 +18,16 @@ const listConversations = async (req, res, next) => {
 
     const map = new Map();
     messages.forEach((message) => {
+      if (!message.pg || !message.sender || !message.receiver) return;
+
       const key = message.conversationKey;
       const isCurrentReceiver = message.receiver._id.toString() === currentUserId;
       const already = map.get(key);
 
       const otherUser =
         message.sender._id.toString() === currentUserId ? message.receiver : message.sender;
+
+      if (!otherUser?._id || !otherUser?.name) return;
 
       if (!already) {
         map.set(key, {
